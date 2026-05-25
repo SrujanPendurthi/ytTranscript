@@ -1,0 +1,15 @@
+# Environment
+.env
+.env.local
+
+# Go binaries
+backend/api
+backend/*.exe
+
+# Frontend
+frontend/dist/
+frontend/node_modules/
+
+# OS
+.DS_Store
+Thumbs.db

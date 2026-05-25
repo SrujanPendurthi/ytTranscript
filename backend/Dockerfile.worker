@@ -1,0 +1,16 @@
+FROM golang:1.26-alpine AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /worker ./cmd/worker
+
+# Runtime needs ffmpeg (audio normalisation) and yt-dlp (audio download).
+# python3-slim gives pip without a full Python install footprint.
+FROM python:3.11-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
+    && pip install --no-cache-dir yt-dlp \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /worker /usr/local/bin/worker
+CMD ["/usr/local/bin/worker"]
