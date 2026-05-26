@@ -78,21 +78,20 @@ func main() {
 		r.Post("/login", authH.Login)
 	})
 
-	// JWT-protected web routes (dashboard, billing portal)
+	// JWT-only routes (web dashboard — no API-key equivalent)
 	r.Group(func(r chi.Router) {
 		r.Use(mw.JWT(cfg.JWTSecret))
-		r.Post("/api/v1/transcribe", transcriptH.Submit)
 		r.Get("/api/v1/jobs", transcriptH.ListJobs)
-		r.Get("/api/v1/jobs/{id}", transcriptH.GetJob)
 		r.Post("/api/billing/checkout", billingH.Checkout)
 		r.Get("/api/v1/keys", apiKeyH.List)
 		r.Post("/api/v1/keys", apiKeyH.Create)
 		r.Delete("/api/v1/keys/{keyID}", apiKeyH.Delete)
 	})
 
-	// API-key-protected developer endpoints
+	// Routes that accept both JWT (dashboard) and API-key (developer) callers.
+	// Bearer token → JWT middleware; anything else → API-key middleware.
 	r.Group(func(r chi.Router) {
-		r.Use(mw.APIKey(database))
+		r.Use(mw.JWTOrAPIKey(cfg.JWTSecret, database))
 		r.Post("/api/v1/transcribe", transcriptH.Submit)
 		r.Get("/api/v1/jobs/{id}", transcriptH.GetJob)
 	})
