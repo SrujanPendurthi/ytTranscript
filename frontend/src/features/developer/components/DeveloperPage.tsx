@@ -16,8 +16,8 @@ export default function DeveloperPage() {
         </p>
       </div>
 
-      <ApiKeysSection />
       <CurlExamples />
+      <ApiKeysSection />
     </div>
   )
 }
@@ -184,31 +184,60 @@ function RevealedKeyBanner({ created, onDismiss }: { created: CreatedApiKey; onD
 // API examples
 // ---------------------------------------------------------------------------
 
-const EXAMPLES = [
-  {
-    title: 'Submit a transcription job',
-    code: `curl -X POST https://api.transcriptflow.io/api/v1/transcribe \\
+/** API root shown in the examples. Override with VITE_API_BASE_URL (e.g. a
+ *  separate prod API host); otherwise use this origin + /api, which is correct
+ *  in dev (Vite proxy) and prod (nginx proxy) alike. */
+function apiBase(): string {
+  const override = import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, '')
+  return override || `${window.location.origin}/api`
+}
+
+function CurlExamples() {
+  const base = apiBase()
+  const examples = [
+    {
+      title: 'Submit a transcription job',
+      code: `curl -X POST ${base}/v1/transcribe \\
   -H "X-API-Key: <your-key>" \\
   -H "Content-Type: application/json" \\
   -d '{"youtube_url":"https://youtu.be/dQw4w9WgXcQ"}'`,
-  },
-  {
-    title: 'Poll job status',
-    code: `curl https://api.transcriptflow.io/api/v1/jobs/<job-id> \\
+    },
+    {
+      title: 'Poll job status',
+      code: `curl ${base}/v1/jobs/<job-id> \\
   -H "X-API-Key: <your-key>"`,
-  },
-]
+    },
+  ]
 
-function CurlExamples() {
   return (
     <div className="space-y-3">
-      <h2 className="px-0.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        Quickstart
-      </h2>
-      {EXAMPLES.map((ex) => (
+      <div className="flex flex-wrap items-center justify-between gap-2 px-0.5">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Quickstart</h2>
+        <BaseUrlChip base={base} />
+      </div>
+      {examples.map((ex) => (
         <CodeBlock key={ex.title} title={ex.title} code={ex.code} />
       ))}
     </div>
+  )
+}
+
+function BaseUrlChip({ base }: { base: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    await navigator.clipboard.writeText(base)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+  return (
+    <button
+      onClick={copy}
+      title="Copy base URL"
+      className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1 font-mono text-xs text-muted-foreground transition hover:text-foreground"
+    >
+      {copied ? <Check className="h-3 w-3 text-primary" /> : <Copy className="h-3 w-3" />}
+      {base}
+    </button>
   )
 }
 
@@ -223,8 +252,8 @@ function CodeBlock({ title, code }: { title: string; code: string }) {
 
   return (
     <div className="overflow-hidden rounded-xl border border-border shadow-sm">
-      <div className="flex items-center justify-between border-b border-slate-800 bg-slate-900 px-4 py-2.5">
-        <span className="inline-flex items-center gap-2 font-mono text-xs text-slate-400">
+      <div className="flex items-center justify-between border-b border-border bg-muted/50 px-4 py-2.5">
+        <span className="inline-flex items-center gap-2 font-mono text-xs text-muted-foreground">
           <Terminal className="h-3.5 w-3.5" />
           {title}
         </span>
@@ -232,14 +261,14 @@ function CodeBlock({ title, code }: { title: string; code: string }) {
           onClick={copy}
           className={cn(
             'inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors',
-            copied ? 'text-emerald-400' : 'text-slate-400 hover:text-slate-200',
+            copied ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
           )}
         >
           {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <pre className="overflow-x-auto bg-slate-950 p-4 text-xs leading-relaxed text-slate-200">{code}</pre>
+      <pre className="overflow-x-auto bg-card p-4 text-xs leading-relaxed text-foreground/85">{code}</pre>
     </div>
   )
 }

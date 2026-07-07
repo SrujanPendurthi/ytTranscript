@@ -8,6 +8,7 @@ TranscriptFlow is a YouTube transcript extraction SaaS: Go (Chi) API + async wor
 ## Build, Lint, Test, Run
 - **Backend build:** `cd backend && go build ./...`
 - **Backend test:** `cd backend && go test ./...` — single test: `go test ./internal/features/transcript/ -run TestParseJSON3 -v`
+- **Backend e2e (needs a running stack):** `cd backend && E2E_BASE_URL=http://localhost:8080 go test -tags e2e ./e2e/ -v` — black-box HTTP test proving the API-key → `/v1/transcribe` path; excluded from the normal suite by the `e2e` build tag.
 - **Frontend build:** `cd frontend && npm run build` (runs `tsc` then `vite build`)
 - **Frontend lint:** `cd frontend && npm run lint` (eslint 9 flat config, `--max-warnings 0` — warnings fail)
 - **Frontend dev server:** `cd frontend && npm run dev`
