@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -23,8 +24,8 @@ func main() {
 	// Stripe global key — must be set before any stripe.* call.
 	stripe.Key = cfg.StripeSecretKey
 
-	// Postgres
-	database, err := db.Connect(cfg.DatabaseURL)
+	// Postgres — retry on boot to survive Docker restart races (~60s).
+	database, err := db.ConnectWithRetry(cfg.DatabaseURL, 30, 2*time.Second)
 	if err != nil {
 		log.Fatalf("db connect: %v", err)
 	}
@@ -33,7 +34,7 @@ func main() {
 	}
 
 	// Redis
-	redisClient, err := queue.NewRedisClient(cfg.RedisURL)
+	redisClient, err := queue.NewRedisClientWithRetry(cfg.RedisURL, 30, 2*time.Second)
 	if err != nil {
 		log.Fatalf("redis: %v", err)
 	}

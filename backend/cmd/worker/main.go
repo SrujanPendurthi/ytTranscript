@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"time"
 
 	"github.com/hibiken/asynq"
 	"github.com/srujanpendurthi/transcriptflow/internal/features/transcript"
@@ -10,10 +11,17 @@ import (
 	"github.com/srujanpendurthi/transcriptflow/internal/platform/queue"
 )
 
+// startupRetries / startupDelay bound how long the worker waits for Postgres
+// and Redis on boot before giving up (~60s) — covers Docker restart races.
+const (
+	startupRetries = 30
+	startupDelay   = 2 * time.Second
+)
+
 func main() {
 	cfg := config.Load()
 
-	database, err := db.Connect(cfg.DatabaseURL)
+	database, err := db.ConnectWithRetry(cfg.DatabaseURL, startupRetries, startupDelay)
 	if err != nil {
 		log.Fatalf("db: %v", err)
 	}
@@ -23,7 +31,7 @@ func main() {
 		log.Fatalf("redis url: %v", err)
 	}
 
-	redisClient, err := queue.NewRedisClient(cfg.RedisURL)
+	redisClient, err := queue.NewRedisClientWithRetry(cfg.RedisURL, startupRetries, startupDelay)
 	if err != nil {
 		log.Fatalf("redis: %v", err)
 	}
