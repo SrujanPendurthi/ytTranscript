@@ -33,6 +33,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+logging.getLogger("uvicorn.access").addFilter(
+    type("_HealthFilter", (logging.Filter,), {
+        "filter": staticmethod(lambda r: "/health" not in r.getMessage())
+    })()
+)
+
 ALLOWED_SUFFIXES = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".webm"}
 
 

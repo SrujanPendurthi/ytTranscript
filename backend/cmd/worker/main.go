@@ -2,18 +2,26 @@ package main
 
 import (
 	"log"
+	"time"
 
 	"github.com/hibiken/asynq"
-	"github.com/srujanpendurthi/transcriptflow/internal/config"
-	"github.com/srujanpendurthi/transcriptflow/internal/db"
-	"github.com/srujanpendurthi/transcriptflow/internal/queue"
-	"github.com/srujanpendurthi/transcriptflow/internal/services/transcript"
+	"github.com/srujanpendurthi/transcriptflow/internal/features/transcript"
+	"github.com/srujanpendurthi/transcriptflow/internal/platform/config"
+	"github.com/srujanpendurthi/transcriptflow/internal/platform/db"
+	"github.com/srujanpendurthi/transcriptflow/internal/platform/queue"
+)
+
+// startupRetries / startupDelay bound how long the worker waits for Postgres
+// and Redis on boot before giving up (~60s) — covers Docker restart races.
+const (
+	startupRetries = 30
+	startupDelay   = 2 * time.Second
 )
 
 func main() {
 	cfg := config.Load()
 
-	database, err := db.Connect(cfg.DatabaseURL)
+	database, err := db.ConnectWithRetry(cfg.DatabaseURL, startupRetries, startupDelay)
 	if err != nil {
 		log.Fatalf("db: %v", err)
 	}
@@ -23,21 +31,24 @@ func main() {
 		log.Fatalf("redis url: %v", err)
 	}
 
-	redisClient, err := queue.NewRedisClient(cfg.RedisURL)
+	redisClient, err := queue.NewRedisClientWithRetry(cfg.RedisURL, startupRetries, startupDelay)
 	if err != nil {
 		log.Fatalf("redis: %v", err)
 	}
 	defer redisClient.Close()
 
-	pipeline := transcript.New(redisClient, cfg.WhisperURL)
+	pipeline := transcript.New(redisClient, cfg.OpenAIAPIKey)
 
 	srv := queue.NewServer(redisOpts, cfg.WorkerConcurrency)
 
 	mux := asynq.NewServeMux()
-	queue.RegisterHandlers(mux, database, pipeline)
+	mux.HandleFunc(
+		transcript.TypeTranscriptionProcess,
+		transcript.NewTranscriptionProcessor(database, pipeline).ProcessTask,
+	)
 
-	log.Printf("TranscriptFlow worker starting (concurrency=%d, whisper=%s)…",
-		cfg.WorkerConcurrency, cfg.WhisperURL)
+	log.Printf("TranscriptFlow worker starting (concurrency=%d, openai=%t)…",
+		cfg.WorkerConcurrency, cfg.OpenAIAPIKey != "")
 	if err := srv.Run(mux); err != nil {
 		log.Fatalf("worker: %v", err)
 	}

@@ -4,16 +4,18 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/srujanpendurthi/transcriptflow/internal/features/apikey"
+	"github.com/srujanpendurthi/transcriptflow/internal/features/auth"
+	"github.com/srujanpendurthi/transcriptflow/internal/features/billing"
+	"github.com/srujanpendurthi/transcriptflow/internal/features/transcript"
+	"github.com/srujanpendurthi/transcriptflow/internal/platform/config"
+	"github.com/srujanpendurthi/transcriptflow/internal/platform/db"
+	"github.com/srujanpendurthi/transcriptflow/internal/platform/queue"
 	stripe "github.com/stripe/stripe-go/v76"
-	"github.com/srujanpendurthi/transcriptflow/internal/auth"
-	"github.com/srujanpendurthi/transcriptflow/internal/config"
-	"github.com/srujanpendurthi/transcriptflow/internal/db"
-	"github.com/srujanpendurthi/transcriptflow/internal/handlers"
-	mw "github.com/srujanpendurthi/transcriptflow/internal/middleware"
-	"github.com/srujanpendurthi/transcriptflow/internal/queue"
 )
 
 func main() {
@@ -22,8 +24,8 @@ func main() {
 	// Stripe global key — must be set before any stripe.* call.
 	stripe.Key = cfg.StripeSecretKey
 
-	// Postgres
-	database, err := db.Connect(cfg.DatabaseURL)
+	// Postgres — retry on boot to survive Docker restart races (~60s).
+	database, err := db.ConnectWithRetry(cfg.DatabaseURL, 30, 2*time.Second)
 	if err != nil {
 		log.Fatalf("db connect: %v", err)
 	}
@@ -32,7 +34,7 @@ func main() {
 	}
 
 	// Redis
-	redisClient, err := queue.NewRedisClient(cfg.RedisURL)
+	redisClient, err := queue.NewRedisClientWithRetry(cfg.RedisURL, 30, 2*time.Second)
 	if err != nil {
 		log.Fatalf("redis: %v", err)
 	}
@@ -45,19 +47,19 @@ func main() {
 	defer queueClient.Close()
 
 	// Handlers
-	transcriptH := handlers.NewTranscriptHandler(database, queueClient)
-	billingH := handlers.NewBillingHandler(
+	transcriptH := transcript.NewHandler(database, queueClient)
+	billingH := billing.NewHandler(
 		database,
 		cfg.StripeProPriceID,
 		cfg.StripeWebhookSecret,
 		cfg.AppURL,
 	)
-	apiKeyH := handlers.NewAPIKeyHandler(database)
+	apiKeyH := apikey.NewHandler(database)
 
 	r := chi.NewRouter()
-	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
 
+	// Health check excluded from logger to suppress healthcheck probe noise.
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		if err := redisClient.Ping(r.Context()).Err(); err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -68,32 +70,35 @@ func main() {
 		fmt.Fprintln(w, `{"status":"ok"}`)
 	})
 
-	// Public — Stripe webhook (no auth; signature-validated inside handler)
-	r.Post("/api/webhook/stripe", billingH.Webhook)
-
-	// Public auth — under /api/auth so nginx can proxy /api/* uniformly.
-	authH := auth.NewHandler(database, cfg.JWTSecret)
-	r.Route("/api/auth", func(r chi.Router) {
-		r.Post("/signup", authH.Signup)
-		r.Post("/login", authH.Login)
-	})
-
-	// JWT-only routes (web dashboard — no API-key equivalent)
 	r.Group(func(r chi.Router) {
-		r.Use(mw.JWT(cfg.JWTSecret))
-		r.Get("/api/v1/jobs", transcriptH.ListJobs)
-		r.Post("/api/billing/checkout", billingH.Checkout)
-		r.Get("/api/v1/keys", apiKeyH.List)
-		r.Post("/api/v1/keys", apiKeyH.Create)
-		r.Delete("/api/v1/keys/{keyID}", apiKeyH.Delete)
-	})
+		r.Use(chimw.Logger)
 
-	// Routes that accept both JWT (dashboard) and API-key (developer) callers.
-	// Bearer token → JWT middleware; anything else → API-key middleware.
-	r.Group(func(r chi.Router) {
-		r.Use(mw.JWTOrAPIKey(cfg.JWTSecret, database))
-		r.Post("/api/v1/transcribe", transcriptH.Submit)
-		r.Get("/api/v1/jobs/{id}", transcriptH.GetJob)
+		// Public — Stripe webhook (no auth; signature-validated inside handler)
+		r.Post("/api/webhook/stripe", billingH.Webhook)
+
+		// Public auth — under /api/auth so nginx can proxy /api/* uniformly.
+		authH := auth.NewHandler(database, cfg.JWTSecret)
+		r.Route("/api/auth", func(r chi.Router) {
+			r.Post("/signup", authH.Signup)
+			r.Post("/login", authH.Login)
+		})
+
+		// JWT-only routes (web dashboard — no API-key equivalent)
+		r.Group(func(r chi.Router) {
+			r.Use(auth.JWT(cfg.JWTSecret))
+			r.Get("/api/v1/jobs", transcriptH.ListJobs)
+			r.Post("/api/billing/checkout", billingH.Checkout)
+			r.Get("/api/v1/keys", apiKeyH.List)
+			r.Post("/api/v1/keys", apiKeyH.Create)
+			r.Delete("/api/v1/keys/{keyID}", apiKeyH.Delete)
+		})
+
+		// Routes that accept both JWT (dashboard) and API-key (developer) callers.
+		r.Group(func(r chi.Router) {
+			r.Use(apikey.JWTOrAPIKey(cfg.JWTSecret, database))
+			r.Post("/api/v1/transcribe", transcriptH.Submit)
+			r.Get("/api/v1/jobs/{id}", transcriptH.GetJob)
+		})
 	})
 
 	fmt.Printf("TranscriptFlow API listening on :%s\n", cfg.Port)

@@ -1,10 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import ProtectedRoute from '@/components/layout/ProtectedRoute'
-import AppLayout from '@/components/layout/AppLayout'
-import LoginPage from '@/pages/LoginPage'
-import SignupPage from '@/pages/SignupPage'
-import DashboardPage from '@/pages/DashboardPage'
-import DeveloperPage from '@/pages/DeveloperPage'
+import AppLayout from '@/components/AppLayout'
+import { LoginPage, SignupPage, ProtectedRoute } from '@/features/auth'
+import { DashboardPage } from '@/features/transcripts'
+import { DeveloperPage } from '@/features/developer'
 
 export default function App() {
   return (

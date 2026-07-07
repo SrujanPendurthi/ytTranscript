@@ -44,6 +44,12 @@ const config: Config = {
         md: 'calc(var(--radius) - 2px)',
         sm: 'calc(var(--radius) - 4px)',
       },
+      keyframes: {
+        eq: { '0%,100%': { height: '25%' }, '50%': { height: '100%' } },
+      },
+      animation: {
+        eq: 'eq 1s ease-in-out infinite',
+      },
     },
   },
   plugins: [],
