@@ -1,16 +1,17 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Zap } from 'lucide-react'
+import { ArrowRight, Loader2 } from 'lucide-react'
 import { useLogin } from '../hooks/useAuthMutations'
-import { cn } from '@/utils'
+import { AuthShell, authInputClass } from './AuthShell'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const { mutate, isPending, error } = useLogin()
 
-  const errorMsg = (error as { response?: { data?: { error?: string } } })
-    ?.response?.data?.error ?? (error ? 'Login failed. Please try again.' : null)
+  const errorMsg =
+    (error as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+    (error ? 'Login failed. Check your email and password.' : null)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -18,71 +19,65 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm space-y-6">
-        {/* Logo */}
-        <div className="flex flex-col items-center gap-2 text-center">
-          <div className="flex items-center gap-2">
-            <Zap className="h-6 w-6 text-primary" />
-            <span className="text-xl font-bold text-foreground">TranscriptFlow</span>
-          </div>
-          <p className="text-sm text-muted-foreground">Sign in to your account</p>
-        </div>
-
-        {/* Card */}
-        <div className="rounded-lg border border-border bg-card p-6 shadow-sm">
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <Field label="Email">
-              <input
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                className={inputClass}
-              />
-            </Field>
-
-            <Field label="Password">
-              <input
-                type="password"
-                autoComplete="current-password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className={inputClass}
-              />
-            </Field>
-
-            {errorMsg && (
-              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {errorMsg}
-              </p>
-            )}
-
-            <button
-              type="submit"
-              disabled={isPending}
-              className={cn(
-                'w-full rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground',
-                'transition-opacity hover:opacity-90 disabled:opacity-50',
-              )}
-            >
-              {isPending ? 'Signing in…' : 'Sign in'}
-            </button>
-          </form>
-        </div>
-
-        <p className="text-center text-sm text-muted-foreground">
+    <AuthShell
+      title="Welcome back"
+      subtitle="Sign in to your account"
+      footer={
+        <>
           No account?{' '}
-          <Link to="/signup" className="font-medium text-foreground underline-offset-4 hover:underline">
+          <Link to="/signup" className="font-medium text-primary underline-offset-4 hover:underline">
             Sign up
           </Link>
-        </p>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Field label="Email">
+          <input
+            type="email"
+            autoComplete="email"
+            required
+            autoFocus
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            className={authInputClass}
+          />
+        </Field>
+
+        <Field label="Password">
+          <input
+            type="password"
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+            className={authInputClass}
+          />
+        </Field>
+
+        {errorMsg && (
+          <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{errorMsg}</p>
+        )}
+
+        <button
+          type="submit"
+          disabled={isPending}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-500 px-4 py-2.5 text-sm font-semibold text-white shadow-[0_10px_22px_-8px_rgba(91,87,240,0.6)] transition hover:brightness-105 active:translate-y-px disabled:opacity-60"
+        >
+          {isPending ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" /> Signing in…
+            </>
+          ) : (
+            <>
+              Sign in <ArrowRight className="h-4 w-4" />
+            </>
+          )}
+        </button>
+      </form>
+    </AuthShell>
   )
 }
 
@@ -94,7 +89,3 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </div>
   )
 }
-
-const inputClass =
-  'w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ' +
-  'placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
