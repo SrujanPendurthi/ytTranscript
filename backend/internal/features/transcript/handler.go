@@ -1,26 +1,37 @@
 package transcript
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/srujanpendurthi/transcriptflow/internal/features/auth"
+	"github.com/srujanpendurthi/transcriptflow/internal/features/billing"
 	"github.com/srujanpendurthi/transcriptflow/internal/platform/models"
 	"github.com/srujanpendurthi/transcriptflow/internal/platform/queue"
 	"github.com/srujanpendurthi/transcriptflow/internal/platform/utils"
 	"gorm.io/gorm"
 )
 
+// idempotencyTTL bounds how long a client may safely retry a submission and get
+// the same job back instead of creating a duplicate (and a duplicate charge).
+const idempotencyTTL = 24 * time.Hour
+
 type Handler struct {
 	db    *gorm.DB
 	queue *queue.Client
+	rdb   *redis.Client
 }
 
-func NewHandler(db *gorm.DB, q *queue.Client) *Handler {
-	return &Handler{db: db, queue: q}
+func NewHandler(db *gorm.DB, q *queue.Client, rdb *redis.Client) *Handler {
+	return &Handler{db: db, queue: q, rdb: rdb}
 }
 
 type transcribeRequest struct {
@@ -51,6 +62,30 @@ func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := r.Context()
+
+	// Idempotency: a repeated submission with the same key returns the original
+	// job instead of creating (and billing) a duplicate.
+	idemKey := r.Header.Get("Idempotency-Key")
+	if idemKey != "" {
+		if existing, ok := h.lookupIdempotent(ctx, userID, idemKey); ok {
+			utils.WriteJSON(w, http.StatusOK, existing)
+			return
+		}
+	}
+
+	// Quota: reject when the plan's included minutes are exhausted and it has no
+	// metered overage.
+	if err := billing.CheckQuota(ctx, h.db, userID); err != nil {
+		var qe *billing.QuotaError
+		if errors.As(err, &qe) {
+			utils.WriteError(w, qe.Status, qe.Message)
+			return
+		}
+		utils.WriteError(w, http.StatusInternalServerError, "quota check failed")
+		return
+	}
+
 	job := models.TranscriptionJob{
 		UserID:     userID,
 		YoutubeURL: req.YoutubeURL,
@@ -76,7 +111,29 @@ func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if idemKey != "" {
+		h.rdb.Set(ctx, idemRedisKey(userID, idemKey), job.ID.String(), idempotencyTTL)
+	}
+
 	utils.WriteJSON(w, http.StatusAccepted, job)
+}
+
+func idemRedisKey(userID uuid.UUID, key string) string {
+	return fmt.Sprintf("idem:%s:%s", userID, key)
+}
+
+// lookupIdempotent returns the job previously created for (userID, key), if the
+// mapping still exists in Redis and the job row is still present.
+func (h *Handler) lookupIdempotent(ctx context.Context, userID uuid.UUID, key string) (models.TranscriptionJob, bool) {
+	id, err := h.rdb.Get(ctx, idemRedisKey(userID, key)).Result()
+	if err != nil {
+		return models.TranscriptionJob{}, false
+	}
+	var job models.TranscriptionJob
+	if err := h.db.Where("id = ? AND user_id = ?", id, userID).First(&job).Error; err != nil {
+		return models.TranscriptionJob{}, false
+	}
+	return job, true
 }
 
 // ListJobs handles GET /api/v1/jobs.
@@ -88,16 +145,36 @@ func (h *Handler) ListJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var jobs []models.TranscriptionJob
-	if err := h.db.Where("user_id = ?", userID).
+	q := h.db.Where("user_id = ?", userID).
 		Order("created_at desc").
-		Limit(20).
-		Find(&jobs).Error; err != nil {
+		Limit(parseLimit(r.URL.Query().Get("limit")))
+
+	// Cursor pagination: pass the created_at of the last row to fetch older jobs.
+	if cursor := r.URL.Query().Get("cursor"); cursor != "" {
+		if t, err := time.Parse(time.RFC3339Nano, cursor); err == nil {
+			q = q.Where("created_at < ?", t)
+		}
+	}
+
+	var jobs []models.TranscriptionJob
+	if err := q.Find(&jobs).Error; err != nil {
 		utils.WriteError(w, http.StatusInternalServerError, "db error")
 		return
 	}
 
 	utils.WriteJSON(w, http.StatusOK, jobs)
+}
+
+// parseLimit clamps the page size to [1, 100], defaulting to 20.
+func parseLimit(s string) int {
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
+		return 20
+	}
+	if n > 100 {
+		return 100
+	}
+	return n
 }
 
 // GetJob handles GET /api/v1/jobs/{id}.

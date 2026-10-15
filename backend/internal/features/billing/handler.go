@@ -36,6 +36,22 @@ func NewHandler(db *gorm.DB, priceID, webhookSecret, appURL string) *Handler {
 	}
 }
 
+// Usage handles GET /api/v1/usage — the caller's consumption for the current
+// billing period. Available to both dashboard (JWT) and developer (API key) callers.
+func (h *Handler) Usage(w http.ResponseWriter, r *http.Request) {
+	userID, ok := auth.UserIDFrom(r.Context())
+	if !ok {
+		utils.WriteError(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	summary, err := UsageSummary(r.Context(), h.db, userID)
+	if err != nil {
+		utils.WriteError(w, http.StatusInternalServerError, "failed to load usage")
+		return
+	}
+	utils.WriteJSON(w, http.StatusOK, summary)
+}
+
 // ---------------------------------------------------------------------------
 // POST /api/billing/checkout  (JWT-protected)
 // ---------------------------------------------------------------------------

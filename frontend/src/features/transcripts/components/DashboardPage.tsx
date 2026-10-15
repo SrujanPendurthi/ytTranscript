@@ -7,7 +7,7 @@ import {
 import { useAuthStore } from '@/features/auth'
 import api from '@/config/api'
 import { cn } from '@/utils'
-import type { Job, JobStatus, Segment, TranscriptSource } from '../types'
+import type { Job, JobStatus, Segment, TranscriptSource, Usage } from '../types'
 
 // ---------------------------------------------------------------------------
 // Lightweight toast (avoids prop-drilling through the job actions)
@@ -420,32 +420,59 @@ function ActionButton({
 function UsageRail({ jobs }: { jobs: Job[] }) {
   const user = useAuthStore((s) => s.user)
 
-  const stats = useMemo(() => {
+  const { data: usage } = useQuery<Usage>({
+    queryKey: ['usage'],
+    queryFn: async () => (await api.get<Usage>('/v1/usage')).data,
+    refetchInterval: 15000,
+  })
+
+  const hitRate = useMemo(() => {
     const completed = jobs.filter((j) => j.status === 'completed')
-    const minutes = Math.round(completed.reduce((m, j) => m + (j.duration_seconds ?? 0), 0) / 60)
     const instant = completed.filter((j) => !j.whisper_used).length
-    const hitRate = completed.length ? Math.round((instant / completed.length) * 100) : 0
-    return { count: jobs.length, minutes, hitRate }
+    return completed.length ? Math.round((instant / completed.length) * 100) : 0
   }, [jobs])
+
+  const used = usage?.minutes_used ?? 0
+  const included = usage?.included_minutes ?? 0
+  const overage = usage?.overage_minutes ?? 0
+  const pct = included ? Math.min(100, Math.round((used / included) * 100)) : 0
+  const nearCap = pct >= 80
 
   return (
     <aside className="flex flex-col gap-3.5 lg:sticky lg:top-[76px]">
       <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-        <h4 className="mb-3.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Overview</h4>
-        <div className="flex gap-3">
-          <Metric value={String(stats.count)} label="transcripts" />
-          <Metric value={stats.minutes.toLocaleString()} label="minutes" />
+        <h4 className="mb-3.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          This period
+        </h4>
+
+        <div className="mb-1.5 flex items-baseline justify-between">
+          <span className="text-[13px] text-muted-foreground">Minutes used</span>
+          <span className="font-mono text-sm tabular-nums">
+            {used.toLocaleString()} <span className="text-muted-foreground/70">/ {included.toLocaleString()}</span>
+          </span>
         </div>
-        <div className="mt-4">
+        <div className="h-1.5 overflow-hidden rounded bg-muted">
+          <div
+            className={cn(
+              'h-full rounded transition-all',
+              nearCap ? 'bg-gradient-to-r from-amber-500 to-red-500' : 'bg-gradient-to-r from-indigo-600 to-violet-500',
+            )}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        {overage > 0 ? (
+          <p className="mt-2 text-[11.5px] text-amber-600">+{overage.toLocaleString()} overage min this period</p>
+        ) : (
+          <p className="mt-2 text-[11.5px] text-muted-foreground/80">{usage?.jobs_count ?? 0} transcripts this period</p>
+        )}
+
+        <div className="mt-4 border-t border-border pt-3.5">
           <div className="mb-1.5 flex items-baseline justify-between">
             <span className="text-[13px] text-muted-foreground">Instant hit rate</span>
-            <span className="font-mono text-sm tabular-nums">{stats.hitRate}%</span>
+            <span className="font-mono text-sm tabular-nums">{hitRate}%</span>
           </div>
           <div className="h-1.5 overflow-hidden rounded bg-muted">
-            <div
-              className="h-full rounded bg-gradient-to-r from-indigo-600 to-violet-500 transition-all"
-              style={{ width: `${stats.hitRate}%` }}
-            />
+            <div className="h-full rounded bg-teal-500 transition-all" style={{ width: `${hitRate}%` }} />
           </div>
           <p className="mt-2 text-[11.5px] text-muted-foreground/80">Returned from captions, no audio pass needed.</p>
         </div>
@@ -453,15 +480,6 @@ function UsageRail({ jobs }: { jobs: Job[] }) {
 
       {user?.plan === 'free' && <UpgradeCard />}
     </aside>
-  )
-}
-
-function Metric({ value, label }: { value: string; label: string }) {
-  return (
-    <div className="flex-1">
-      <div className="font-mono text-xl tracking-tight tabular-nums text-foreground">{value}</div>
-      <div className="mt-0.5 text-[11.5px] text-muted-foreground/80">{label}</div>
-    </div>
   )
 }
 

@@ -8,6 +8,16 @@ export interface Segment {
   text: string
 }
 
+export interface Usage {
+  plan: string
+  included_minutes: number
+  minutes_used: number
+  overage_minutes: number
+  jobs_count: number
+  allow_overage: boolean
+  period_start: string
+}
+
 export interface Job {
   id: string
   user_id: string

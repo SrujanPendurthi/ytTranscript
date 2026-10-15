@@ -7,6 +7,7 @@ import (
 	"log"
 
 	"github.com/hibiken/asynq"
+	"github.com/srujanpendurthi/transcriptflow/internal/features/billing"
 	"github.com/srujanpendurthi/transcriptflow/internal/platform/models"
 	"gorm.io/gorm"
 )
@@ -60,7 +61,7 @@ func (p *TranscriptionProcessor) ProcessTask(ctx context.Context, t *asynq.Task)
 	for i, s := range result.Segments {
 		segs[i] = models.Segment{Start: s.Start, End: s.End, Text: s.Text}
 	}
-	return p.db.WithContext(ctx).Model(&job).Updates(map[string]any{
+	if err := p.db.WithContext(ctx).Model(&job).Updates(map[string]any{
 		"status":           models.JobStatusCompleted,
 		"transcript_text":  result.Text,
 		"language":         result.Language,
@@ -69,5 +70,16 @@ func (p *TranscriptionProcessor) ProcessTask(ctx context.Context, t *asynq.Task)
 		"source":           result.Source,
 		"segments":         segs,
 		"error_message":    nil,
-	}).Error
+	}).Error; err != nil {
+		return err
+	}
+
+	// Meter usage (per-minute of media). Best-effort: a metering hiccup must not
+	// re-fail an already-completed job — a reconciliation pass can backfill.
+	job.DurationSeconds = &result.Duration
+	job.Source = &result.Source
+	if err := billing.RecordUsage(ctx, p.db, &job); err != nil {
+		log.Printf("[queue] usage metering failed for job %s: %v", job.ID, err)
+	}
+	return nil
 }

@@ -12,5 +12,7 @@ func RunMigrations(database *gorm.DB) error {
 		&models.APIKey{},
 		&models.UsageLog{},
 		&models.TranscriptionJob{},
+		&models.UsageRecord{},
+		&models.UsageCounter{},
 	)
 }

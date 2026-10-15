@@ -15,6 +15,7 @@ import (
 	"github.com/srujanpendurthi/transcriptflow/internal/platform/config"
 	"github.com/srujanpendurthi/transcriptflow/internal/platform/db"
 	"github.com/srujanpendurthi/transcriptflow/internal/platform/queue"
+	"github.com/srujanpendurthi/transcriptflow/internal/platform/ratelimit"
 	stripe "github.com/stripe/stripe-go/v76"
 )
 
@@ -47,7 +48,8 @@ func main() {
 	defer queueClient.Close()
 
 	// Handlers
-	transcriptH := transcript.NewHandler(database, queueClient)
+	limiter := ratelimit.New(redisClient)
+	transcriptH := transcript.NewHandler(database, queueClient, redisClient)
 	billingH := billing.NewHandler(
 		database,
 		cfg.StripeProPriceID,
@@ -93,11 +95,14 @@ func main() {
 			r.Delete("/api/v1/keys/{keyID}", apiKeyH.Delete)
 		})
 
-		// Routes that accept both JWT (dashboard) and API-key (developer) callers.
+		// Routes that accept both JWT (dashboard) and API-key (developer) callers,
+		// rate-limited per the caller's plan.
 		r.Group(func(r chi.Router) {
 			r.Use(apikey.JWTOrAPIKey(cfg.JWTSecret, database))
+			r.Use(billing.RateLimit(database, limiter))
 			r.Post("/api/v1/transcribe", transcriptH.Submit)
 			r.Get("/api/v1/jobs/{id}", transcriptH.GetJob)
+			r.Get("/api/v1/usage", billingH.Usage)
 		})
 	})
 

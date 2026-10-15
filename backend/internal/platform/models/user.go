@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 // Plan represents the user's billing tier.
 type Plan string
 
@@ -16,4 +18,8 @@ type User struct {
 	StripeCustomerID string `gorm:"index"                              json:"stripe_customer_id,omitempty"`
 	Plan             Plan   `gorm:"type:varchar(20);not null;default:'free'" json:"plan"`
 	IsActive         bool   `gorm:"not null;default:true"              json:"is_active"`
+	// Stripe subscription state for hybrid billing (base + metered overage).
+	SubscriptionID   string     `gorm:"index"        json:"-"` // sub_…
+	MeteredItemID    string     `                    json:"-"` // si_… (per-minute overage item)
+	CurrentPeriodEnd *time.Time `                    json:"current_period_end,omitempty"`
 }
